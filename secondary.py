@@ -11,9 +11,11 @@ logging.basicConfig(level=logging.INFO)
 @app.route('/replicate', methods=['POST'])
 def replicate_message():
     msg = request.json.get('message')
+    logging.info(f"Received replication request: {msg}")
     time.sleep(5)
     messages.append(msg)
-    logging.info(f"Replicated message: {msg}")
+    #logging.info(f"Replicated message: {msg}")
+    logging.info("Replicated message appended.")
     return jsonify({"status": "Replicated"}), 200
 
 @app.route('/messages', methods=['GET'])
