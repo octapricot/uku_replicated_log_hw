@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
 import logging
-#import requests
-import asyncio 
-from concurrent.futures import ThreadPoolExecutor
-import aiohttp 
+import requests
+import asyncio
+import aiohttp
+from latch import AsyncCountDownLatch
 
 app = Flask(__name__)
 
@@ -13,48 +13,76 @@ secondaries = ["http://secondary1:5001", "http://secondary2:5001"]
 
 logging.basicConfig(level=logging.INFO) 
 
-async def replicate_to_secondary(secondary_url, message):
+# Послідовність id, щоб кожному новому меседжу присвоювати id + 1
+message_id_seq = 0
+
+def get_next_id():
+    global message_id_seq
+    message_id_seq += 1
+    return message_id_seq
+
+async def replicate_to_secondary(secondary_url: str, message: object, latch: AsyncCountDownLatch):
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.post(f"{secondary_url}/replicate", json={"message": message}) as response:
+            async with session.post(f"{secondary_url}/replicate", json=message) as response:
                 if response.status == 200:
-                    logging.info(f"Secondary {secondary_url} acknowledged.")
+                    json_response = await response.json()
+                    logging.info(f"Secondary {secondary_url} acknowledged. Replication status: {json_response.get('status', 'No status field')}")
+                    await latch.count_down()
                 else:
                     logging.error(f"Failed to replicate to {secondary_url}. Status: {response.status}")
         except aiohttp.ClientError as e:
             logging.error(f"Error communicating with secondary {secondary_url}: {e}")
+            
+async def replicate(write_concern: int, message: object):
+    latch = AsyncCountDownLatch(write_concern - 1)
 
+    # Запускає реплікацію
+    for secondary in secondaries:
+        asyncio.create_task(replicate_to_secondary(secondary, message, latch))
+
+    # Чекає онулення
+    try:
+        await asyncio.wait_for(latch.await_latch(), timeout=3600)
+        logging.info(f"Write concern {write_concern} satisfied.")
+    except asyncio.TimeoutError:
+        logging.error("Write concern not met within timeout.")
+        
+        
 @app.route('/append', methods=['POST'])
 def append_message(): 
-    msg = request.json.get('message')
-    messages.append(msg)
-    logging.info(f"Received message: {msg}")
-
-    #for secondary in secondaries: 
-    #    try:
-    #        res = requests.post(f"{secondary}/replicate", json={"message": msg})
-    #        if res.status_code == 200:
-    #            logging.info(f"Secondary {secondary} acknowledged.")
-    #        else: 
-    #            return jsonify({"error": "Failed to replicate"}), 500
-    #    except requests.exceptions.RequestException as exc:
-    #        logging.error(f"Error while communicating with secondary: {exc}")
-    #        return jsonify({"error": "Secondary cannot be reached"}), 500
+    message_text = request.json.get('message')
+    write_concern = request.json.get('write_concern', len(secondaries) + 1)
+    if write_concern < 1 or write_concern > len(secondaries) + 1:
+        return jsonify({"status": f"Invalid write_concern value {write_concern}"}), 400
     
-    # Asynchronous replication to all secondaries
-    async def replicate():
-        tasks = [replicate_to_secondary(secondary, msg) for secondary in secondaries]
-        print("Sent replication commands. Waiting for finish.")
-        await asyncio.gather(*tasks)
+    message = {"message_id": get_next_id(), "message": message_text}
+    messages.append(message)
+    logging.info(f"Received message: {message_text}, write concern: {write_concern}")
     
-    # Run asynchronous replication in the background
-    asyncio.run(replicate())
-
+    asyncio.run(replicate(write_concern, message))
+    
     return jsonify({"status": "Message appended and replicated"}), 200
 
 @app.route('/messages', methods=['GET'])
 def get_messages():
     return jsonify(messages)
+
+
+# Ендпойнт для полегшення тестування (обнуляє всі повідомлення і тестові затримки на мастері й другорядних нодах)
+@app.route('/test/reset', methods=['POST'])
+def reset_servers():
+    global messages, message_id_seq
+    messages = []
+    message_id_seq = 0
+    for secondary in secondaries: 
+        try:
+            requests.post(f"{secondary}/test/reset")
+        except requests.exceptions.RequestException as exc:
+            logging.error(f"Error while resetting secondary: {exc}")
+            return jsonify({"error": "Secondary cannot be reached"}), 500
+    return "Success", 200
+        
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

@@ -5,11 +5,11 @@ Homework: https://docs.google.com/document/d/1D1C7dyNJan_6ssF2cC-16bWXn26TD5BlDQ
 
 Progress: 
 
-Iteration Zero
+Iteration Zero D
 
-Iteration One
+Iteration One D
 
-Iteration Two 
+Iteration Two WIP
 
 Iteration Three
 
