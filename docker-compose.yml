@@ -9,6 +9,8 @@ services:
     depends_on:
       - secondary1
       - secondary2
+    networks:
+      - replicated_log_network
 
   secondary1:
     build:
@@ -16,6 +18,13 @@ services:
       dockerfile: dockerfile_secondary
     ports:
       - "5001:5001"
+    networks:
+      - replicated_log_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   secondary2:
     build:
@@ -23,6 +32,17 @@ services:
       dockerfile: dockerfile_secondary
     ports:
       - "5002:5001"
+    networks:
+      - replicated_log_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    
+networks:
+  replicated_log_network:
+    driver: bridge
 
 
 

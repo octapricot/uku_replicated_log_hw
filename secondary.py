@@ -3,6 +3,7 @@ import logging
 import time
 import queue
 import asyncio
+import random 
 
 app = Flask(__name__)
 
@@ -26,6 +27,9 @@ shared_lock = asyncio.Lock()
 
 @app.route('/replicate', methods=['POST'])
 async def replicate_message():
+    # Simulate random internal server error 
+    if random.random() < 0.5:
+        return jsonify({"status": "Error"}), 500
     global last_processed_id, message_buffer
     data = request.json
     logging.info(f"Received replication request: {data}")
@@ -89,6 +93,10 @@ def reset_servers():
     test_delay_seconds_queue = queue.Queue()
     return "Success", 200
     
+# Health checks 
+@app.route('/heartbeat', methods=['GET'])
+def heartbeat():
+    return jsonify({"status": "alive"}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
